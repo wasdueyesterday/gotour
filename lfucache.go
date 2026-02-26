@@ -1,6 +1,8 @@
 package gotour
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -73,6 +75,7 @@ func (t *LFUCache) insertToList(node *LFUNode, lst *List) {
 	node.prev = p
 	node.next = lst.mru
 	lst.mru.prev = node
+	lst.size++
 }
 
 // Need to promote the frequency with 2 steps
@@ -136,4 +139,78 @@ func (t *LFUCache) Put(key int, value int)  {
 	// ensure the node is linked before it can be found
 	t.insertToList(nd, t.freqMap[t.minFreq])
 	t.cache[key] = nd
+}
+
+func (t *LFUCache) checkIntegrity() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	totalNodesInLists := 0 
+	// iterate through every freqMap
+	for f, lst := range t.freqMap {
+		nodesInThisList := 0
+
+		// start after the LRU sentinel
+		curr := lst.lru.next
+
+		// walk until we hit the MRU sentinel
+		for curr != lst.mru {
+			// verify the node thinks it belongs to this freq
+			if curr.freq != f {
+				fmt.Printf("Integrity error! Node key=%d, freq=%d, lst freq=%d\n", curr.key, curr.freq, f)
+				return false
+			}
+			nodesInThisList++
+			curr = curr.next
+		}
+
+		// verify list.size metadata is correct
+		if nodesInThisList != lst.size {
+			fmt.Printf("Integrity error! lst.size=%d, but nodesInThisList=%d\n", lst.size, nodesInThisList)
+			return false
+		}
+
+		totalNodesInLists += nodesInThisList
+	}
+	// verify list total matches the cache
+	if totalNodesInLists != len(t.cache) {
+		fmt.Printf("Integrity error! totalNodesInLists=%d, cache count=%d\n", totalNodesInLists, len(t.cache))
+		return false
+	}
+
+	// for simplicity, i don't delete empty list, but for heavy production use, this is pron to memory leak
+	// however, the following check is relaxed, which allows empty lists
+	if len(t.cache) > 0 {
+		lst, exist := t.freqMap[t.minFreq]
+		if !exist {
+			fmt.Printf("Integrity error! when cache not empty, current lowest frequency list must exists!")
+			return false
+		}
+		if lst.size == 0 {
+			fmt.Printf("Integrity error! freqMap[minFreq] size=%d", lst.size)
+			return false
+		}
+		for f, other := range t.freqMap {
+			if other.size > 0 && f < t.minFreq {
+				fmt.Printf("Integrity error! Found list at freq %d, but minFreq is %d", f, t.minFreq)
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (t *LFUCache) String() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "LFU (minFreq: %d, size: %d)\n", t.minFreq, len(t.cache))
+	for f, lst := range t.freqMap {
+		fmt.Fprintf(&sb, " [Freq %d]: ", f)
+		curr := lst.lru.next
+		for curr != lst.mru {
+			fmt.Fprintf(&sb, "{%d:%d} ", curr.key, curr.value)
+			curr = curr.next
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }

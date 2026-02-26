@@ -22,7 +22,7 @@ type LRUCache struct {
 }
 
 
-func NewLruCache(capacity int) *LRUCache {
+func NewLRUCache(capacity int) *LRUCache {
 	left := &LRUNode{key: 0, value: 0}
 	right := &LRUNode{key: 0, value: 0}
 
